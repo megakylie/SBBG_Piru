@@ -1,0 +1,87 @@
+---
+title: "PiruUCDV_InsectCollections"
+author: "Kylie Etter"
+date: '2023-03-21'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+This R Markdown is for the visualization and analyses of the insect abundance and richness collected from the different treatments at the Piru Restoration area. The Piru Restoration project started in 2022. 16 pairs of plots were established, and one of the plots in the pair was planted with native plants. 8 reference plots in intact native chaparral were also established.
+
+
+#Step 1. Downloading packages. 
+```{r}
+#Tidyverse suite of packages, most of the code uses tidyverse syntax over base R.
+library(tidyverse)
+
+#Packages for figure making
+library(ggplot2)
+library(RColorBrewer)
+library(scales)
+library(ggpubr)
+```
+
+#Step 2. Download and reshape the data.
+```{r}
+#downloading whole .csv as is
+piru_invertALL <- read_csv("PiruRestorationUCD_CollectedInvertebrates1.csv")
+
+#sorting to only include lines/Project# with count information. Then selecting only columns that we might need to make it easier to look at the data.
+piru_invertCLEAN <- piru_invertALL %>% drop_na(c("individualCount")) %>% select("Project#", "Morphospecies#", "MorphospeciesName", order, superfamily, family, genus, scientificName, individualCount, lifeStage, eventID, samplingProtocol, locationID, year, month, day) %>% rename(morph="Morphospecies#")
+
+#Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also anyalses those together and not broken down by collection method...
+eventSummary <- piru_invertCLEAN %>% group_by(eventID, morph, MorphospeciesName, samplingProtocol, locationID) %>% summarise(MorphCount=sum(individualCount))
+
+#summarized by event, 3 per plot: 1 net and 2 pitfalls
+eventSummary2 <-eventSummary %>% group_by(eventID) %>% mutate(InsectAbundance=sum(MorphCount), InsectRichness=n_distinct(MorphospeciesName)) %>% select(eventID, samplingProtocol, InsectAbundance, InsectRichness) %>% distinct(eventID, .keep_all=TRUE)
+
+#summarized by plot number, so sweep net/beat net and pitfalls all combined
+plotSummary <-eventSummary %>% group_by(locationID) %>% mutate(InsectAbundance=sum(MorphCount), InsectRichness=n_distinct(MorphospeciesName)) %>% select(locationID, InsectAbundance, InsectRichness) %>% distinct(locationID, .keep_all=TRUE)
+```
+
+#Step 3. Analyses and visualization. 
+```{r}
+#comparing everything collected in pitfalls and sweep nets across the control and restoration plot (reference not included due to diff in sampling methods and sample size). Code below is pulling just C and R. There were no collections from R3 and R22 but we sampled them so added in rows with zero abundance and richness
+#***#Will need to remove R3 and R22 add row code if there are Diptera collected from 
+plotSummary2 <- plotSummary %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% add_row(Plot= "R3", Type="R", Number = '3', InsectAbundance = 0, InsectRichness = 0) %>% add_row(Plot= "R22", Type="R", Number = '22', InsectAbundance = 0, InsectRichness = 0)
+
+#running Shapiro-Wilk tests on the normality of the data to see if a parametric or non-parametric test needs to be used
+d <- with(plotSummary2, 
+        InsectAbundance[Type == "C"] - InsectAbundance[Type == "R"])
+# Shapiro-Wilk normality test for the differences
+shapiro.test(d)
+# p = 0.4078, not sig
+
+e <- with(plotSummary2, 
+        InsectRichness[Type == "C"] - InsectRichness[Type == "R"])
+# Shapiro-Wilk normality test for the differences
+shapiro.test(e)
+# p = 0.8936, not sig
+
+
+plotSummary_abun = ggplot(plotSummary2, aes(x=Type, y=InsectAbundance, fill=Type)) + geom_boxplot() + stat_compare_means(method="t.test", paired=TRUE) + labs(y="Insect Abundance", x="Plot Type") + scale_fill_manual(values=c("#F2E80A","#C2D6D4")) + theme(text=element_text(size=24))+theme_bw()
+plotSummary_abun
+plotSummary_rich = ggplot(plotSummary2, aes(x=Type, y=InsectRichness, fill=Type)) + geom_boxplot() + stat_compare_means(method="t.test", paired=TRUE) + labs(y="Insect Richness", x="Plot Type") + scale_fill_manual(values=c("#F2E80A","#C2D6D4")) + theme(text=element_text(size=24))+theme_bw()
+plotSummary_rich
+
+#Download the figures 
+ggsave(plot=plotSummary_abun, filename="figures/Plot_Abundance.png", height = 14, width=16, units="cm", dpi=150)
+ggsave(plot=plotSummary_rich, filename="figures/Plot_Richness.png", height = 14, width=16, units="cm", dpi=150)
+
+```
+
+#Extra
+Getting Ant Abudance and Diversity data by plot type (control or restoration) for Zach
+```{r}
+#create ant specific data and filter to just control and restoration
+ants <- piru_invertCLEAN %>% filter(family=="Formicidae") %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% filter(Type=="C" | Type=="R")
+
+#summarize by plot type and methods 
+ant_summary <- ants %>% group_by(Type, samplingProtocol, MorphospeciesName) %>% summarise(MorphCount=sum(individualCount))
+
+write_csv(ant_summary, "AntSummary.csv", na="")
+```
