@@ -58,6 +58,8 @@ eventSummaryComplete <- right_join(eventSummary2, events) %>% replace(is.na(.), 
 #summarized by plot number, so sweep net/beat net and pitfalls all combined across both years, removing the Z7 collected in unkwn year...check on that
 plotSummary <-eventSummary %>% group_by(locationID, year) %>% mutate(InsectAbundance=sum(MorphCount), InsectRichness=n_distinct(MorphospeciesName)) %>% select(locationID, InsectAbundance, InsectRichness) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE) %>% distinct(plotyear, .keep_all=TRUE) %>% filter(!year %in% c('#N/A'))
 #80 plots which what we want
+
+write.csv(plotSummary, "figures/plotSummary.csv", na="")
 ```
 
 #Step 4. Analyses and visualization. 
