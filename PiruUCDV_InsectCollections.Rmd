@@ -16,6 +16,8 @@ This R Markdown is for the visualization and analyses of the insect abundance an
 ```{r}
 #Tidyverse suite of packages, most of the code uses tidyverse syntax over base R.
 library(tidyverse)
+library(psych)
+library(corrplot)
 
 #Packages for figure making
 library(ggplot2)
@@ -28,24 +30,28 @@ library(rstatix)
 #Step 2. Download the data 
 ```{r}
 #downloading whole .csv as is
-piru_invertALL <- read_csv("PiruRestorationUCD_InvertFinal.csv")
+piru_invertALL <- read_csv("SBBG_PiruRestorationUCD_CollectedInvertebrates.csv")
 #list of events to easily add in zeroes
 events <- read_csv("EventsList.csv")
 events$year = as.character(events$year)
 
+#making a list of plots and years and then creating a new year column
 plots <- piru_invertALL %>% distinct(locationID) %>% filter(!locationID %in% c('#N/A'))
-
 plot2022 <- plots %>% add_column(year="2022")
 plot2023 <- plots %>% add_column(year="2023")
 plots = full_join(plot2022, plot2023)
-```
 
-#Step 3. Reshape Data
-```{r Summarizing by year, plot and sampling protocol}
 #sorting to only include lines/Project# with count information. Then selecting only columns that we might need to make it easier to look at the data. Also only including the three big focal orders
 piru_invertCLEAN <- piru_invertALL %>% drop_na(c("individualCount")) %>% select("Project#", "Morphospecies#", "MorphospeciesName", order, superfamily, family, genus, scientificName, individualCount, lifeStage, eventID, samplingProtocol, locationID, year, month, day, fieldNumber) %>% rename(morph="Morphospecies#") %>% filter(order=="Coleoptera" | order=="Diptera" | order=="Hymenoptera")
 
-#Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also anyalses those together and not broken down by collection method...
+#plant and abiotic data
+plot_character <- read_csv('cleanGeographicPlantData_Piru.csv') %>% rename(plotyear="PlotID")
+plot_character$year <- as.character(plot_character$year)
+```
+
+#Step 3. Reshape Data
+```{r Summarizing by year plot and sampling protocol}
+#Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also analyses those together and not broken down by collection method...
 eventSummary <- piru_invertCLEAN %>% group_by(year, eventID, morph, MorphospeciesName, samplingProtocol, locationID) %>% summarise(MorphCount=sum(individualCount))
 
 #summarized by event, 6 per plot: 1 net and 2 pitfalls each yr
@@ -54,7 +60,7 @@ eventSummary2 <-eventSummary %>% group_by(eventID) %>% mutate(InsectAbundance=su
 eventSummaryComplete <- right_join(eventSummary2, events) %>% replace(is.na(.), 0) 
 ```
 
-```{r}
+```{r Summarized by Plot across years and methods}
 #summarized by plot number, so sweep net/beat net and pitfalls all combined across both years, removing the Z7 collected in unkwn year...check on that
 plotSummary <-eventSummary %>% group_by(locationID, year) %>% mutate(InsectAbundance=sum(MorphCount), InsectRichness=n_distinct(MorphospeciesName)) %>% select(locationID, InsectAbundance, InsectRichness) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE) %>% distinct(plotyear, .keep_all=TRUE) %>% filter(!year %in% c('#N/A'))
 #80 plots which what we want
@@ -63,8 +69,9 @@ write.csv(plotSummary, "figures/plotSummary.csv", na="")
 ```
 
 #Step 4. Analyses and visualization. 
+###All three orders together
 Doing standard control versus removal all insects on a plot by plot type. Not including the reference because beat net. 
-```{r}
+```{r Control and Restoration Plots Comparison}
 #comparing everything collected in pitfalls and sweep nets across the control and restoration plot (reference not included due to diff in sampling methods and sample size). Code below is pulling just C and R. 
 plotSummary2 <- plotSummary %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R")
 
@@ -86,8 +93,8 @@ ggsave(plot=plotSummary_abun, filename="figures/Plot_Abundance20222023.png", hei
 ggsave(plot=plotSummary_rich, filename="figures/Plot_Richness2022023.png", height = 14, width=16, units="cm", dpi=150)
 ```
 
-#comparing the three different treatments by year and abund, rich of pit fall traps.
-```{r}
+Comparing the three different treatments by year and abund, rich of pit fall traps.
+```{r Control Restoration and Reference Pitfall Comparison}
 pitfall2022 <- eventSummaryComplete %>% filter(year=="2022") %>% filter(samplingProtocol=="pitfall trap") %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
 
 x=pitfall2022 %>% group_by(plotType) %>%identify_outliers(InsectAbundance)
@@ -124,8 +131,8 @@ ggsave(plot=pitfall_abun2023, filename="figures/pitfallAbun_2023.png", height = 
 ggsave(plot=pitfall_rich2023, filename="figures/pitfallRich_2023.png", height = 14, width=16, units="cm", dpi=150)
 ```
 
-#comparing the control and restoration plot sweep net collections
-```{r}
+Comparing the control and restoration plot sweep net collections
+```{r Control and Restoration Plots Sweep Net Only Comparison}
 sweepnets <- eventSummaryComplete %>% filter(samplingProtocol=="sweep net") 
 sweepnets$year <- as.character(sweepnets$year)
 
@@ -140,10 +147,10 @@ ggsave(plot=sweepnet_abun, filename="figures/sweepnetAbun.png", height = 14, wid
 ggsave(plot=sweepnet_rich, filename="figures/sweepnetRich.png", height = 14, width=20, units="cm", dpi=150)
 ```
 
-#Analyses with the 3 Orders. 
+###Three Orders separately
 
-##Comparing all methods on a plot in the three orders.
-```{r}
+First separating the data into the different orders
+```{r Control and Restoration Plot Comparisons: By Order}
 Diptera <- piru_invertCLEAN %>% filter(order=="Diptera")
 Coleoptera <- piru_invertCLEAN %>% filter(order=="Coleoptera")
 Hymenoptera <- piru_invertCLEAN %>% filter(order=="Hymenoptera")
@@ -154,6 +161,7 @@ plot2022 <- plots %>% add_column(year="2022")
 plot2023 <- plots %>% add_column(year="2023")
 plots = full_join(plot2022, plot2023) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE)
 ```
+
 ```{r Diptera data wrangle}
 #Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also anyalses those together and not broken down by collection method...
 DipteraSummary <- Diptera %>% group_by(year, eventID, morph, MorphospeciesName, samplingProtocol, locationID) %>% summarise(MorphCount=sum(individualCount))
@@ -165,6 +173,7 @@ plotDiptera <-DipteraSummary %>% group_by(locationID, year) %>% mutate(Abundance
 plotDipt2 <- right_join(plotDiptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% replace(is.na(.), 0) 
 #64 plots which what we want
 ```
+
 ```{r Coleoptera data wrangle}
 #Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also anyalses those together and not broken down by collection method...
 ColeopteraSummary <- Coleoptera %>% group_by(year, eventID, morph, MorphospeciesName, samplingProtocol, locationID) %>% summarise(MorphCount=sum(individualCount))
@@ -176,6 +185,7 @@ plotColeoptera <-ColeopteraSummary %>% group_by(locationID, year) %>% mutate(Abu
 plotCol2 <- right_join(plotColeoptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% replace(is.na(.), 0) 
 #64 plots which what we want
 ```
+
 ```{r Hymenoptera data wrangle}
 #Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also anyalses those together and not broken down by collection method...
 HymenopteraSummary <- Hymenoptera %>% group_by(year, eventID, morph, MorphospeciesName, samplingProtocol, locationID) %>% summarise(MorphCount=sum(individualCount))
@@ -188,7 +198,7 @@ plotHym2 <- right_join(plotHymenoptera, plots) %>% separate(locationID, into=pas
 #64 plots which what we want
 ```
 
-```{r C and R Plot - Order Visualization}
+```{r C and R Plot Comparison: By Order Visualization}
 plotDipt2 %>% shapiro_test(Abundance)
 #not normal
 ggqqplot(plotDipt2, "Abundance")
@@ -224,7 +234,7 @@ PlotOrders
 ggsave(plot=PlotOrders, filename="figures/PlotOrder.png", height = 16, width=22, units="cm", dpi=150)
 ```
 
-##Summarizing by events for the orders
+Summarizing by events for the orders
 ```{r}
 #Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also anyalses those together and not broken down by collection method...
 eventSummaryOrders <- piru_invertCLEAN %>% group_by(year, eventID, morph, MorphospeciesName, order, samplingProtocol, locationID) %>% summarise(MorphCount=sum(individualCount))
@@ -244,7 +254,7 @@ HymenopteraeventSummaryComplete <- right_join(HymenopteraEvent, events) %>% repl
 ```
 
 Orders and Sweep netting 
-```{r}
+```{r Control and Restoration Sweep Net Comparison: By Order}
 Dipterasweepnets <- DipteraeventSummaryComplete %>% filter(samplingProtocol=="sweep net") 
 
 Dipsweepnet_abun = ggplot(Dipterasweepnets, aes(x=year, y=Abundance, fill=plotType)) + geom_boxplot() + labs(y="Diptera Abundance", x="Year") + scale_fill_manual(values=c("#F2E80A","#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="wilcox", paired=TRUE, label.y=35, size=3) 
@@ -276,7 +286,7 @@ ggsave(plot=PlotOrders_SweepNet, filename="figures/PlotOrder_SweetNet.png", heig
 ```
 
 Orders and pit falls
-```{r}
+```{r Control Restoration and Reference Pitfall Comparison: By Order}
 Diptera_pitfall <- DipteraeventSummaryComplete %>% filter(samplingProtocol=="pitfall trap") %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
 
 Dippitfall_abun = ggplot(Diptera_pitfall, aes(x=year, y=Abundance, fill=plotType)) + geom_boxplot() + labs(y="Diptera Abundance", x="Year")+ scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" ))  + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=9.5, size=3) + scale_y_continuous(limits=c(0,11), expand = c(0,0.1), breaks=seq(0, 10, by=2))
@@ -312,9 +322,101 @@ PlotOrders_Pitfall
 ggsave(plot=PlotOrders_Pitfall, filename="figures/PlotOrder_Pitfall.png", height = 16, width=26, units="cm", dpi=150)
 ```
 
+#Diversity Analyses
+```{r Shannon Diversity and Ordination}
+library(vegan)
 
-List of what was collected
-```{r}
+#Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots (getting error trying to make matrix that it would take 22.9 GB)
+sumformatrix <- piru_invertCLEAN %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+sumformatrix2 <- inner_join(sumformatrix, events)
+x <- anti_join(sumformatrix, events) #checking what was removed
+sumformatrix3 <- sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+matrix <- spread(sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+matrixnum <- matrix[,4:163] 
+H <- diversity(matrixnum, "shannon")
+#adding shannon into dataframe
+matrix$shannon = H
+
+#Figure with all three plotTypes
+ShannonDiversity = ggplot(matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+ShannonDiversity
+library(FSA)
+dunnTest(shannon~plotType,data=matrix)
+
+#Just including control and restoration, need to remove the reference information and any columns that were present because of it (zeroes)
+sumformatrix3_experimental <- sumformatrix2 %>% filter(plotType=="Control" | plotType=="Restoration") %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+matrix_exp <- spread(sumformatrix3_experimental, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.),0)
+#calculating shannon diversity
+matrixnum_exp <- matrix_exp[,4:143] 
+H_exp <- diversity(matrixnum_exp, "shannon")
+#adding shannon into dataframe
+matrix_exp$shannon = H_exp
+
+#Figure with just control and restoration
+ShannonDiversity2 = ggplot(matrix_exp, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="wilcox", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+ShannonDiversity2
+
+ShannonDiversity2.1 = ggplot(matrix_exp, aes(x=plotType, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Plot Type") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="wilcox", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+ShannonDiversity2.1
+
+#Download Figures
+ggsave(plot=ShannonDiversity, filename="figures/ShannonDiversityAll.png", height = 16, width=26, units="cm", dpi=150)
+#Download Figures
+ggsave(plot=ShannonDiversity2, filename="figures/ShannonDiversityControlRestorationByYear.png", height = 16, width=22, units="cm", dpi=150)
+ggsave(plot=ShannonDiversity2.1, filename="figures/ShannonDiversityControlRestoration.png", height = 16, width=22, units="cm", dpi=150)
+
+##Ordinations
+#Three plot types
+ordination <- metaMDS(matrixnum)
+ord_gg = as.data.frame(scores(ordination)$sites)
+ord_gg$plotType = matrix$plotType
+ord_gg$year = matrix$year
+ord_gg$locationID = matrix$locationID
+
+(InsectOrdination = ggplot(data=ord_gg, aes(x=NMDS1, y=NMDS2)) + 
+     geom_point(data = ord_gg, aes(colour = plotType), size = 3, alpha = 1)  + stat_ellipse(geom="polygon", type="t", alpha=0.2, aes(fill=plotType), show.legend=FALSE) +
+     theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+       axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+       legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       legend.text = element_text(size = 9, colour = "grey30")) + 
+     labs(colour = "PlotType"))
+
+adonis=adonis2(matrixnum~ord_gg$plotType, permutations=1000)
+adonis
+#plotType is sig P<0.000999
+
+#Experimental only
+ordination_exp <- metaMDS(matrixnum_exp)
+ord_exp = as.data.frame(scores(ordination_exp)$sites)
+ord_exp$plotType = matrix_exp$plotType
+ord_exp$year = matrix_exp$year
+ord_exp$locationID = matrix_exp$locationID
+
+(InsectOrdination_EXP = ggplot(data=ord_exp, aes(x=NMDS1, y=NMDS2)) + 
+     geom_point(data = ord_exp, aes(colour = plotType), size = 3, alpha = 1)  + stat_ellipse(geom="polygon", type="t", alpha=0.2, aes(fill=plotType), show.legend=FALSE) +
+     theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+       axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+       legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       legend.text = element_text(size = 9, colour = "grey30")) + 
+     labs(colour = "PlotType") +
+    scale_color_manual(values=c('#F2E80A', "#C2D6D4"))  +  scale_fill_manual(values=c('#F2E80A', "#C2D6D4")))
+
+adonis_exp=adonis2(matrixnum_exp~ord_exp$plotType, permutations=1000)
+adonis_exp
+#plotType is sig P<0.003996
+
+#Download ordination
+ggsave(plot=InsectOrdination, filename="figures/Ordination.png", height=18, width=18, units="cm", dpi=150)
+ggsave(plot=InsectOrdination_EXP, filename="figures/Ordination_ControlRestoration2.png", height=18, width=18, units="cm", dpi=150)
+```
+
+
+#Collected Taxa List
+```{r Collected Taxa list}
 specieslist_prep <- piru_invertCLEAN %>% group_by(eventID, morph, MorphospeciesName, locationID) %>% mutate(MorphCount=sum(individualCount)) %>% select(order, family, genus, scientificName, MorphospeciesName, morph, eventID, locationID, MorphCount)
 
 specieslist_prep2 <- left_join(specieslist_prep, events)
@@ -324,13 +426,152 @@ specieslist_long <- specieslist_prep2 %>% group_by(morph, MorphospeciesName, ord
 specieslist <- specieslist_long %>% distinct(morph, .keep_all=TRUE) %>% select(order, family, genus, MorphospeciesName, morph, -plotType, -num)
 
 write.csv(specieslist, "figures/specieslist.csv", na="")
+
+#By plot type 
+control_list <- specieslist_long %>% filter(plotType=="Control")
+reference_list <- specieslist_long %>% filter(plotType=="Reference")
+restoration_list <- specieslist_long %>% filter(plotType=="Restoration")
+
+#Control combining the other two plot types (reference and restoration) and comparing to get the unique control morphs
+control_compare <- full_join(reference_list, restoration_list)
+control_unique <- anti_join(control_list, control_compare, by='morph')
+
+#reference
+reference_compare <- full_join(control_list, restoration_list)
+reference_unique <- anti_join(reference_list, reference_compare, by='morph')
+
+#restoration
+restoration_compare <- full_join(control_list, reference_list)
+restoration_unique <- anti_join(restoration_list, restoration_compare, by='morph')
+
+write.csv(control_unique, "figures/ControlUniqueTaxa.csv", na="")
+write.csv(reference_unique, "figures/ReferenceUniqueTaxa.csv", na="")
+write.csv(restoration_unique, "figures/RestorationUniqueTaxa.csv", na="")
+```
+
+#Comparison to Plant Data
+```{r Adding Insect Orders to plotsummary}
+#Must run four chunks 8-11 above to split by insect order
+#Adding in the abundance and richness of each order to the plot Summary
+plotSummaryA <- left_join(plotSummary, plotDiptera) %>% rename(DipteraAbundance="Abundance", DipteraRichness="Richness")
+plotSummaryB <- left_join(plotSummaryA, plotColeoptera) %>% rename(ColeopteraAbundance="Abundance", ColeopteraRichness="Richness")
+plotSummaryC <- left_join(plotSummaryB, plotHymenoptera) %>% rename(HymenopteraAbundance="Abundance", HymenopteraRichness="Richness") 
+```
+
+```{r Cont and Rest plots combined across years}
+#downloading plant and abiotic data
+plot_character <- read_csv('cleanGeographicPlantData_Piru.csv') %>% rename(plotyear="PlotID", Solrad_watthrsperm2 ="solrad_watt-hrs/m2", NativeBiomass ='Native shrub biomass (kg/m2)', NonNativeBiomass='NonNative grass/forb biomass (kg/m2)')
+plot_character$year <- as.character(plot_character$year)
+
+#combine with insect data summarized across plots combined for both years
+insect_plant <- left_join(plot_character, plotSummary, by=)
+insect_plant <- insect_plant %>% replace(is.na(.), 0) 
+
+#adding shannon test caluclated above #chunck 16 creates the matrix
+shannon <- matrix %>% filter(plotType=="Control" | plotType=="Restoration") %>% select(locationID, year, shannon)
+insect_plant2 <- left_join(insect_plant, shannon)
+
+#keeping only the variables to do a corr test, removing rows with nas, zeroes, and non-numeric
+coor_insect_plant <- insect_plant2 %>% dplyr::select(-plotyear, -year, -Treatment, -x, -y, -locationID, -`Height_SD(m)`, -`Canopy_SD(m)`, -EcoUnit, -Wood, -`Height_avg(m)`, -`Canopy_avg(m)`, -`Decomp Rate_Jun-Sep 2022`, -`Decomp Rate_Mar-Jun 2023`, -`2023Only Non-Native Sp Rich`)
+
+#corr test
+library(psych)
+library(corrplot)
+corrtest=corr.test(coor_insect_plant, y=coor_insect_plant)
+corrtest
+corr1 = corrplot(cor(coor_insect_plant), method='number', addCoef.col = 2,number.cex = 0.7, tl.cex = 0.9)
+corr1
+#saving at 1200 x 1000 jpeg worked for me 
+
+##Abiotic factors first
+#elevation
+elev_abun=ggplot(data=insect_plant, aes(x=elevation_m, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm") 
+elev_abun
+
+#aspect
+aspect_abun=ggplot(data=insect_plant, aes(x=aspect_deg, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm")
+aspect_abun
+
+#slope
+slope_abun=ggplot(data=insect_plant, aes(x=slope_deg, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm")
+slope_abun
+
+#solarrad
+solarrad_abun=ggplot(data=insect_plant, aes(x=Solrad_watthrsperm2, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm") + labs(x='Solar Radiation watt-hours per m2')
+solarrad_abun
+
+AbioticFig = ggarrange(elev_abun, aspect_abun, slope_abun, solarrad_abun)
+AbioticFig
+```
+
+```{r Restoration Plant/Abiotic v Insect BOTH years}
+#going to look at just restoration plots 
+rest_corr <- insect_plant2 %>% filter(Treatment=="Restored") %>% dplyr::select(-plotyear, -year, -Treatment, -x, -y, -locationID, -`Height_SD(m)`, -`Canopy_SD(m)`, -EcoUnit, -Wood, -`Decomp Rate_Jun-Sep 2022`, -`Decomp Rate_Mar-Jun 2023`, -`2023Only Non-Native Sp Rich`)
+
+corr_rest = corrplot(cor(rest_corr), method='number', title="Restoration Plots Only", addCoef.col = 2,number.cex = 0.7, tl.cex = 0.9)
+corr_rest
+
+#GroundCover
+#bareground
+bare_abun=ggplot(data=insect_plant, aes(x=Bareground, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm") 
+bare_abun
+
+#litter
+litter_abun=ggplot(data=insect_plant, aes(x=Litter, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm") 
+litter_abun
+
+#rock
+rock_abun=ggplot(data=insect_plant, aes(x=Rock, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm") 
+rock_abun
+
+#plant
+native_abun=ggplot(data=insect_plant, aes(x=NativeBiomass, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm") 
+native_abun
+
+#nonative
+nonnative_abun=ggplot(data=insect_plant, aes(x=NonNativeBiomass, y=InsectAbundance, fill=year)) + geom_point() + geom_smooth(method="lm") 
+nonnative_abun
+
+#total biomass
+total_abun=ggplot(data=insect_plant, aes(x=`Total biomass`, y=InsectAbundance, color=Treatment)) + geom_point() + geom_smooth(method="lm") + scale_color_manual(values=c("#F2E80A","#C2D6D4"))
+total_abun
+
+```
+
+```{r Correlation split by year & plotType}
+#2022
+insect_plant2022 <- insect_plant %>% filter(year=="2022")
+#keeping only the variables to do a corr test, removing rows with nas, zeroes, and non-numeric
+coor_2022 <- insect_plant2022 %>% dplyr::select(-plotyear, -year, -Treatment, -x, -y, -locationID, -`Height_SD(m)`, -`Canopy_SD(m)`, -EcoUnit, -Wood, -`Height_avg(m)`, -`Canopy_avg(m)`, -`Decomp Rate_Jun-Sep 2022`, -`Decomp Rate_Mar-Jun 2023`, -`2023Only Non-Native Sp Rich`)
+
+corr2022 = corrplot(cor(coor_2022), method='number', title='2022', addCoef.col = 2,number.cex = 0.7, tl.cex = 0.9)
+corr2022
+
+#2022 restoration only
+coor_2022_rest <- insect_plant %>% filter(year=="2022") %>% filter(Treatment=="Restored") %>% dplyr::select(-plotyear, -year, -Treatment, -x, -y, -locationID, -`Height_SD(m)`, -`Canopy_SD(m)`, -EcoUnit, -Wood, -`Height_avg(m)`, -`Canopy_avg(m)`, -`Decomp Rate_Jun-Sep 2022`, -`Decomp Rate_Mar-Jun 2023`, -`2023Only Non-Native Sp Rich`)
+
+corr2022rest = corrplot(cor(coor_2022_rest), method='number', title='2022 Restoration Only', addCoef.col = 2,number.cex = 0.7, tl.cex = 0.9)
+corr2022rest
+
+#2023
+insect_plant2023 <- insect_plant %>% filter(year=="2023")
+#keeping only the variables to do a corr test, removing rows with nas, zeroes, and non-numeric
+coor_2023 <- insect_plant2023 %>% dplyr::select(-plotyear, -year, -Treatment, -x, -y, -locationID, -`Height_SD(m)`, -`Canopy_SD(m)`, -EcoUnit, -Wood, -`Height_avg(m)`, -`Canopy_avg(m)`, -`Decomp Rate_Jun-Sep 2022`, -`Decomp Rate_Mar-Jun 2023`, -`2023Only Non-Native Sp Rich`)
+
+corr2023 = corrplot(cor(coor_2023), method='number', title="2023", addCoef.col = 2,number.cex = 0.7, tl.cex = 0.9)
+corr2023
+
+#2023 restoration only
+coor_2023_rest <- insect_plant %>% filter(year=="2023") %>% filter(Treatment=="Restored") %>% dplyr::select(-plotyear, -year, -Treatment, -x, -y, -locationID, -`Height_SD(m)`, -`Canopy_SD(m)`, -EcoUnit, -Wood, -`Height_avg(m)`, -`Canopy_avg(m)`, -`Decomp Rate_Jun-Sep 2022`, -`Decomp Rate_Mar-Jun 2023`, -`2023Only Non-Native Sp Rich`)
+
+corr2023rest = corrplot(cor(coor_2023_rest), method='number', title='2023 Restoration Only', addCoef.col = 2,number.cex = 0.7, tl.cex = 0.9)
+corr2023rest
 ```
 
 
 
-#Extra 2022
-Getting Ant Abundance and Diversity data by plot type (control or restoration) for Zach
-```{r}
+#Extra 2022: Getting Ant Abundance and Diversity data by plot type (control or restoration) for Zach
+```{r Ant Summary}
 #create ant specific data and filter to just control and restoration
 ants <- piru_invertCLEAN %>% filter(family=="Formicidae") %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% filter(Type=="C" | Type=="R")
 
