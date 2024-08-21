@@ -10,7 +10,7 @@ editor_options:
 
 This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
-This R Markdown is for the visualization and analyses of the insect abundance and richness collected from the different treatments at the Piru Restoration area. The Piru Restoration project started in 2022. 16 pairs of plots were established, and one of the plots in the pair was planted with native plants. 8 reference plots in intact native chaparral were also established. In 2022 and 2023 two pitfall traps were placed in the middle of all plots for 24 hours in June. The paired plots were additionally sweep netted, where the reference plots were beat netted. 
+This R Markdown is for the visualization and analyses of the insects collected from the different treatments at the Piru Restoration area. To understand insect trends a few different methods were used: comparison between the insect abundance, richness and diversity between plot types, ordinations of diversity, and correlations. The Piru Restoration project started in 2022. 16 pairs of plots were established, and one of the plots in the pair was planted with native plants. 8 reference plots in intact native chaparral were also established. In 2022 and 2023 two pitfall traps were placed in the middle of all plots for 24 hours in June. The paired plots were additionally sweep netted, where the reference plots were beat netted. 
 
 #Step 1. Downloading packages. 
 ```{r}
@@ -31,17 +31,20 @@ library(rstatix)
 ```{r}
 #downloading whole .csv as is
 piru_invertALL <- read_csv("SBBG_PiruRestorationUCD_CollectedInvertebrates.csv")
-#list of events to easily add in zeroes
+#list of events to easily add in zeroes. Want to make sure that events with zero caught are still included in analyses later on.
 events <- read_csv("EventsList.csv")
 events$year = as.character(events$year)
+#there was an issue where the collection type was lost for some specimens collected on R18 in 2022, so this version includes that
+eventsR18 <- read_csv("EventsList_R18Error.csv")
+eventsR18$year = as.character(eventsR18$year)
 
 #making a list of plots and years and then creating a new year column
 plots <- piru_invertALL %>% distinct(locationID) %>% filter(!locationID %in% c('#N/A'))
 plot2022 <- plots %>% add_column(year="2022")
 plot2023 <- plots %>% add_column(year="2023")
 plots = full_join(plot2022, plot2023)
-
-#sorting to only include lines/Project# with count information. Then selecting only columns that we might need to make it easier to look at the data. Also only including the three big focal orders
+plots$year = as.character(plots$year)
+#sorting to only include lines/Project# with count information (removing blanks). Then selecting only the columns that we might need. Also only including the three big focal orders that were choosen due to their roles in the environment (Coleoptera, Diptera and Hymenoptera)
 piru_invertCLEAN <- piru_invertALL %>% drop_na(c("individualCount")) %>% select("Project#", "Morphospecies#", "MorphospeciesName", order, superfamily, family, genus, scientificName, individualCount, lifeStage, eventID, samplingProtocol, locationID, year, month, day, fieldNumber) %>% rename(morph="Morphospecies#") %>% filter(order=="Coleoptera" | order=="Diptera" | order=="Hymenoptera")
 
 #plant and abiotic data
@@ -51,26 +54,28 @@ plot_character$year <- as.character(plot_character$year)
 
 #Step 3. Reshape Data
 ```{r Summarizing by year plot and sampling protocol}
-#Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also analyses those together and not broken down by collection method...
+#Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiosity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also analyses those together and not broken down by collection method...
 eventSummary <- piru_invertCLEAN %>% group_by(year, eventID, morph, MorphospeciesName, samplingProtocol, locationID) %>% summarise(MorphCount=sum(individualCount))
 
 #summarized by event, 6 per plot: 1 net and 2 pitfalls each yr
 eventSummary2 <-eventSummary %>% group_by(eventID) %>% mutate(InsectAbundance=sum(MorphCount), InsectRichness=n_distinct(MorphospeciesName)) %>% select(eventID, samplingProtocol, InsectAbundance, InsectRichness) %>% distinct(eventID, .keep_all=TRUE)
-#203 out of the possible 240 are non-zeroes, adding in the zeroes
+#199 out of the possible 240 are non-zeroes, adding in the events that have zeroes. n=240 (2 pitfall traps and one sweep net per plot(x40) per year(x2))
 eventSummaryComplete <- right_join(eventSummary2, events) %>% replace(is.na(.), 0) 
 ```
 
 ```{r Summarized by Plot across years and methods}
 #summarized by plot number, so sweep net/beat net and pitfalls all combined across both years, removing the Z7 collected in unkwn year...check on that
 plotSummary <-eventSummary %>% group_by(locationID, year) %>% mutate(InsectAbundance=sum(MorphCount), InsectRichness=n_distinct(MorphospeciesName)) %>% select(locationID, InsectAbundance, InsectRichness) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE) %>% distinct(plotyear, .keep_all=TRUE) %>% filter(!year %in% c('#N/A'))
-#80 plots which what we want
+#80 plots(40 plots x 2 years) which what we want
 
 write.csv(plotSummary, "figures/plotSummary.csv", na="")
 ```
 
 #Step 4. Analyses and visualization. 
-###All three orders together
+##Step 4A. Insect Abundance, Richness and Diversity Comparisons by plot type 
+(have to do diversity separate because it takes more effort to get the diversity number)
 Doing standard control versus removal all insects on a plot by plot type. Not including the reference because beat net. 
+###All three orders together
 ```{r Control and Restoration Plots Comparison}
 #comparing everything collected in pitfalls and sweep nets across the control and restoration plot (reference not included due to diff in sampling methods and sample size). Code below is pulling just C and R. 
 plotSummary2 <- plotSummary %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R")
@@ -93,8 +98,8 @@ ggsave(plot=plotSummary_abun, filename="figures/Plot_Abundance20222023.png", hei
 ggsave(plot=plotSummary_rich, filename="figures/Plot_Richness2022023.png", height = 14, width=16, units="cm", dpi=150)
 ```
 
-Comparing the three different treatments by year and abund, rich of pit fall traps.
-```{r Control Restoration and Reference Pitfall Comparison}
+Comparing the three different treatments by year and abund, rich and diversity of pit fall traps.
+```{r Pitfall Abudance and Richness by Year and PlotType}
 pitfall2022 <- eventSummaryComplete %>% filter(year=="2022") %>% filter(samplingProtocol=="pitfall trap") %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
 
 x=pitfall2022 %>% group_by(plotType) %>%identify_outliers(InsectAbundance)
@@ -131,8 +136,51 @@ ggsave(plot=pitfall_abun2023, filename="figures/pitfallAbun_2023.png", height = 
 ggsave(plot=pitfall_rich2023, filename="figures/pitfallRich_2023.png", height = 14, width=16, units="cm", dpi=150)
 ```
 
+```{r Pitfall Diversity by PlotType and Year}
+#Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots 
+pitfalls <- piru_invertCLEAN %>% filter(samplingProtocol=="pitfall trap") 
+PIT_sumformatrix <- pitfalls %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+#creating events list of just the pitfall traps
+pitfall_events <- events %>% filter(samplingProtocol=="pitfall trap") 
+#adding in the zero events
+PIT_sumformatrix2 <- inner_join(PIT_sumformatrix, pitfall_events)
+x <- anti_join(PIT_sumformatrix, pitfall_events) #checking what was removed
+PIT_sumformatrix3 <- PIT_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+PIT_matrix <- spread(PIT_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+PIT_matrixnum <- PIT_matrix[,4:82] 
+H <- diversity(PIT_matrixnum, "shannon")
+#adding shannon into dataframe
+PIT_matrix$shannon = H
+
+#Figure with all three plotTypes
+PIT_ShannonDiversity = ggplot(PIT_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+PIT_ShannonDiversity
+library(FSA)
+dunnTest(shannon~plotType,data=PIT_matrix)
+
+#2022
+pit2022 <- PIT_matrix %>% filter(year=="2022") %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+PIT2022_ShannonDiversity = ggplot(pit2022, aes(x=plotType, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="2022 Pitfall Collections") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+PIT2022_ShannonDiversity
+library(FSA)
+dunnTest(shannon~plotType,data=pit2022)
+
+#2023
+pit2023 <- PIT_matrix %>% filter(year=="2023") %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+PIT2023_ShannonDiversity = ggplot(pit2023, aes(x=plotType, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="2023 Pitfall Collections") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+PIT2023_ShannonDiversity
+library(FSA)
+dunnTest(shannon~plotType,data=pit2023)
+
+#Downloading Figures
+ggsave(plot=PIT2022_ShannonDiversity, filename="figures/pitfallDiv_2022.png", height = 14, width=16, units="cm", dpi=150)
+ggsave(plot=PIT2023_ShannonDiversity, filename="figures/pitfallDiv_2023.png", height = 14, width=16, units="cm", dpi=150)
+```
+
 Comparing the control and restoration plot sweep net collections
-```{r Control and Restoration Plots Sweep Net Only Comparison}
+```{r Sweep Net Abundance and Richness by Year and Plot}
 sweepnets <- eventSummaryComplete %>% filter(samplingProtocol=="sweep net") 
 sweepnets$year <- as.character(sweepnets$year)
 
@@ -147,6 +195,42 @@ ggsave(plot=sweepnet_abun, filename="figures/sweepnetAbun.png", height = 14, wid
 ggsave(plot=sweepnet_rich, filename="figures/sweepnetRich.png", height = 14, width=20, units="cm", dpi=150)
 ```
 
+```{r Sweep Net Diversity by Year and Plot}
+#Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots 
+sweepnets <- piru_invertCLEAN %>% filter(samplingProtocol=="sweep net") 
+SWEEP_sumformatrix <- sweepnets %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+#creating events list of just the sweep nets
+sweepnet_events <- events %>% filter(samplingProtocol=="sweep net")
+SWEEP_sumformatrix2 <- inner_join(SWEEP_sumformatrix, sweepnet_events)
+x <- anti_join(SWEEP_sumformatrix, sweepnet_events) #checking what was removed
+SWEEP_sumformatrix3 <- SWEEP_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+SWEEP_matrix <- spread(SWEEP_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+SWEEP_matrixnum <- SWEEP_matrix[,4:99] 
+H <- diversity(SWEEP_matrixnum, "shannon")
+#adding shannon into dataframe
+SWEEP_matrix$shannon = H
+
+#2022
+sweep2022 <- SWEEP_matrix %>% filter(year=="2022") %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+SWEEP2022_ShannonDiversity = ggplot(sweep2022, aes(x=plotType, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Sweep Net Collections") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+SWEEP2022_ShannonDiversity
+
+#2023
+sweep2023 <- SWEEP_matrix %>% filter(year=="2023") %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+SWEEP2023_ShannonDiversity = ggplot(sweep2023, aes(x=plotType, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Sweep Net Collections") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+SWEEP2023_ShannonDiversity
+
+#Downloading Figures
+ggsave(plot=SWEEP2022_ShannonDiversity, filename="figures/sweepnetDiv_2022.png", height = 14, width=16, units="cm", dpi=150)
+ggsave(plot=SWEEP2023_ShannonDiversity, filename="figures/sweepnetDiv_2023.png", height = 14, width=16, units="cm", dpi=150)
+
+#One plot
+sweepnet_diversity = ggplot(SWEEP_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+ggsave(plot=sweepnet_diversity, filename="figures/sweepnetDiversity.png", height = 14, width=16, units="cm", dpi=150)
+```
+
 ###Three Orders separately
 
 First separating the data into the different orders
@@ -154,12 +238,6 @@ First separating the data into the different orders
 Diptera <- piru_invertCLEAN %>% filter(order=="Diptera")
 Coleoptera <- piru_invertCLEAN %>% filter(order=="Coleoptera")
 Hymenoptera <- piru_invertCLEAN %>% filter(order=="Hymenoptera")
-
-#getting plots list to add in zeroes
-
-plot2022 <- plots %>% add_column(year="2022")
-plot2023 <- plots %>% add_column(year="2023")
-plots = full_join(plot2022, plot2023) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE)
 ```
 
 ```{r Diptera data wrangle}
@@ -168,9 +246,9 @@ DipteraSummary <- Diptera %>% group_by(year, eventID, morph, MorphospeciesName, 
 
 #summarized by plot number, so sweep net/beat net and pitfalls all combined across both years, removing the Z7 collected in unkwn year...check on that
 plotDiptera <-DipteraSummary %>% group_by(locationID, year) %>% mutate(Abundance=sum(MorphCount), Richness=n_distinct(MorphospeciesName)) %>% select(locationID, Abundance, Richness) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE) %>% distinct(plotyear, .keep_all=TRUE) %>% filter(!year %in% c('#N/A'))
-
+plotDiptera$year =as.character(plotDiptera$year)
 #adding in zero plots
-plotDipt2 <- right_join(plotDiptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% replace(is.na(.), 0) 
+plotDipt2 <- right_join(plotDiptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% dplyr::select(-plotyear) %>% replace(is.na(.), 0) 
 #64 plots which what we want
 ```
 
@@ -182,7 +260,7 @@ ColeopteraSummary <- Coleoptera %>% group_by(year, eventID, morph, Morphospecies
 plotColeoptera <-ColeopteraSummary %>% group_by(locationID, year) %>% mutate(Abundance=sum(MorphCount), Richness=n_distinct(MorphospeciesName)) %>% select(locationID, Abundance, Richness) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE) %>% distinct(plotyear, .keep_all=TRUE) %>% filter(!year %in% c('#N/A'))
 
 #adding in zero plots
-plotCol2 <- right_join(plotColeoptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% replace(is.na(.), 0) 
+plotCol2 <- right_join(plotColeoptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% dplyr::select(-plotyear)%>% replace(is.na(.), 0) 
 #64 plots which what we want
 ```
 
@@ -194,11 +272,11 @@ HymenopteraSummary <- Hymenoptera %>% group_by(year, eventID, morph, Morphospeci
 plotHymenoptera <-HymenopteraSummary %>% group_by(locationID, year) %>% mutate(Abundance=sum(MorphCount), Richness=n_distinct(MorphospeciesName)) %>% select(locationID, Abundance, Richness) %>% unite("plotyear", locationID:year, sep=" ", remove=FALSE) %>% distinct(plotyear, .keep_all=TRUE) %>% filter(!year %in% c('#N/A'))
 
 #adding in zero plots
-plotHym2 <- right_join(plotHymenoptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% replace(is.na(.), 0) 
+plotHym2 <- right_join(plotHymenoptera, plots) %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% filter(Type=="C" | Type=="R") %>% dplyr::select(-plotyear) %>% replace(is.na(.), 0) 
 #64 plots which what we want
 ```
 
-```{r C and R Plot Comparison: By Order Visualization}
+```{r Abun and Rich by Order for all Collection Types on Control and Restoraiton Plots}
 plotDipt2 %>% shapiro_test(Abundance)
 #not normal
 ggqqplot(plotDipt2, "Abundance")
@@ -234,6 +312,81 @@ PlotOrders
 ggsave(plot=PlotOrders, filename="figures/PlotOrder.png", height = 16, width=22, units="cm", dpi=150)
 ```
 
+```{r Order Diversity for all collection types on Control and Restoration plots}
+#Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots 
+invertControlRest <- left_join(piru_invertCLEAN, events) %>% filter(plotType=="Restoration" | plotType=="Control")
+
+##COLEOPTERA
+coleoptera_diversity <- invertControlRest %>% filter(order=="Coleoptera") 
+COL_sumformatrix <- coleoptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#adding event information
+x <- anti_join(COL_sumformatrix, events) #checking if anything removed
+COL_sumformatrix2 <- inner_join(COL_sumformatrix, events)
+
+COL_sumformatrix3 <- COL_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+COL_matrix <- spread(COL_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+COL_matrixnum <- COL_matrix[,4:39] 
+H <- diversity(COL_matrixnum, "shannon")
+#adding shannon into dataframe
+COL_matrix$shannon = H
+
+#Coleoptera Diversity Plots
+plotCol_div= ggplot(COL_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Coleoptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+plotCol_div
+
+##DIPTERA
+diptera_diversity <- invertControlRest %>% filter(order=="Diptera") 
+DIP_sumformatrix <- diptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#adding event information
+x <- anti_join(DIP_sumformatrix, eventsR18) #using R18 version to keep the fly diversity of unkwn collection type
+DIP_sumformatrix2 <- inner_join(DIP_sumformatrix, eventsR18)
+
+DIP_sumformatrix3 <- DIP_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+DIP_matrix <- spread(DIP_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+DIP_matrixnum <- DIP_matrix[,4:50] 
+H <- diversity(DIP_matrixnum, "shannon")
+#adding shannon into dataframe
+DIP_matrix$shannon = H
+
+#Diptera Diversity Plots
+plotDip_div= ggplot(DIP_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Diptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+plotDip_div
+
+##HYMENOPTERA
+hymenoptera_diversity <- invertControlRest %>% filter(order=="Hymenoptera") 
+HYM_sumformatrix <- hymenoptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#adding event information
+x <- anti_join(HYM_sumformatrix, events) #checking if anything removed
+HYM_sumformatrix2 <- inner_join(HYM_sumformatrix, events)
+HYM_sumformatrix3 <- HYM_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+HYM_matrix <- spread(HYM_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+HYM_matrixnum <- HYM_matrix[,4:60] 
+H <- diversity(HYM_matrixnum, "shannon")
+#adding shannon into dataframe
+HYM_matrix$shannon = H
+
+#Hymenoptera Diversity Plots
+plotHym_div= ggplot(HYM_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Hymenoptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+plotHym_div
+
+
+##Adding in Diversity figures into the figure array, MUST run chunks 10-14 above this first to create abun and rich figures
+PlotOrdersV2 = ggarrange( plotCol_abun, plotDip_abun, plotHym_abun, plotCol_rich, plotDip_rich, plotHym_rich, plotCol_div, plotDip_div, plotHym_div, common.legend=TRUE)
+PlotOrdersV2
+
+#Download the figures 
+ggsave(plot=PlotOrdersV2, filename="figures/PlotOrderVersion2.png", height = 24, width=28, units="cm", dpi=150)
+```
+
 Summarizing by events for the orders
 ```{r}
 #Summarizing the abundance and richness by event (plot-sampling type). eventSummary is an intermediate step just for curiousity, eventSummary2 is what will be used for the figures and analyses. I remove the R18 counts because the event info was lost and we don't know if those were from a pitfall trap or sweep net. Could also anyalses those together and not broken down by collection method...
@@ -254,7 +407,7 @@ HymenopteraeventSummaryComplete <- right_join(HymenopteraEvent, events) %>% repl
 ```
 
 Orders and Sweep netting 
-```{r Control and Restoration Sweep Net Comparison: By Order}
+```{r Abun and Rich by Order for Sweep Net collections}
 Dipterasweepnets <- DipteraeventSummaryComplete %>% filter(samplingProtocol=="sweep net") 
 
 Dipsweepnet_abun = ggplot(Dipterasweepnets, aes(x=year, y=Abundance, fill=plotType)) + geom_boxplot() + labs(y="Diptera Abundance", x="Year") + scale_fill_manual(values=c("#F2E80A","#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="wilcox", paired=TRUE, label.y=35, size=3) 
@@ -284,6 +437,92 @@ PlotOrders_SweepNet
 #Download Figures
 ggsave(plot=PlotOrders_SweepNet, filename="figures/PlotOrder_SweetNet.png", height = 16, width=22, units="cm", dpi=150)
 ```
+
+```{r Diversity by Order for Sweep Nets}
+#Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots 
+sweepnets <- piru_invertCLEAN %>% filter(samplingProtocol=="sweep net") 
+
+##COLEOPTERA
+SNcoleoptera_diversity <- sweepnets %>% filter(order=="Coleoptera") 
+SNCOL_sumformatrix <- SNcoleoptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#creating events list of just the sweep nets
+sweepnet_events <- events %>% filter(samplingProtocol=="sweep net")
+#adding event information
+x <- anti_join(SNCOL_sumformatrix, sweepnet_events) #checking if anything removed
+SNCOL_sumformatrix2 <- inner_join(SNCOL_sumformatrix, sweepnet_events)
+
+SNCOL_sumformatrix3 <- SNCOL_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+SNCOL_matrix <- spread(SNCOL_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+SNCOL_matrixnum <- SNCOL_matrix[,4:26] 
+H <- diversity(SNCOL_matrixnum, "shannon")
+#adding shannon into dataframe
+SNCOL_matrix$shannon = H
+
+#Coleoptera Diversity Sweep Nets
+SNplotCol_div= ggplot(SNCOL_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Coleoptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+SNplotCol_div
+
+##DIPTERA
+SNdiptera_diversity <- sweepnets %>% filter(order=="Diptera") 
+SNDIP_sumformatrix <- SNdiptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#creating events list of just the sweep nets
+sweepnet_events <- events %>% filter(samplingProtocol=="sweep net")
+#adding event information
+x <- anti_join(SNDIP_sumformatrix, sweepnet_events) #using R18 version to keep the fly diversity of unkwn collection type
+SNDIP_sumformatrix2 <- inner_join(SNDIP_sumformatrix, sweepnet_events)
+
+SNDIP_sumformatrix3 <- SNDIP_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+SNDIP_matrix <- spread(SNDIP_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+SNDIP_matrixnum <- SNDIP_matrix[,4:39] 
+H <- diversity(SNDIP_matrixnum, "shannon")
+#adding shannon into dataframe
+SNDIP_matrix$shannon = H
+
+#Diptera Diversity Plots
+SNplotDip_div= ggplot(SNDIP_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Diptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+SNplotDip_div
+
+##HYMENOPTERA
+SNhymenoptera_diversity <- sweepnets %>% filter(order=="Hymenoptera") 
+SNHYM_sumformatrix <- SNhymenoptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#creating events list of just the sweep nets
+sweepnet_events <- events %>% filter(samplingProtocol=="sweep net")
+#adding event information
+x <- anti_join(SNHYM_sumformatrix, sweepnet_events) #checking if anything removed
+SNHYM_sumformatrix2 <- inner_join(HYM_sumformatrix, sweepnet_events)
+SNHYM_sumformatrix3 <- SNHYM_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+SNHYM_matrix <- spread(SNHYM_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+SNHYM_matrixnum <- SNHYM_matrix[,4:40] 
+H <- diversity(SNHYM_matrixnum, "shannon")
+#adding shannon into dataframe
+SNHYM_matrix$shannon = H
+
+#Hymenoptera Diversity Plots
+SNplotHym_div= ggplot(SNHYM_matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Hymenoptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+SNplotHym_div
+
+
+##Adding in Diversity figures into the figure array, MUST run chunks 16-17 above this first to create abun and rich figures
+PlotOrdersV2 = ggarrange( plotCol_abun, plotDip_abun, plotHym_abun, plotCol_rich, plotDip_rich, plotHym_rich, plotCol_div, plotDip_div, plotHym_div, common.legend=TRUE)
+PlotOrdersV2
+
+
+PlotOrders_SweepNetV2 = ggarrange(Colsweepnet_abun, Dipsweepnet_abun, Hymsweepnet_abun, Colsweepnet_rich, Dipsweepnet_rich, Hymsweepnet_rich, SNplotCol_div, SNplotDip_div, SNplotHym_div, common.legend=TRUE)
+PlotOrders_SweepNetV2
+
+#Download Figures
+ggsave(plot=PlotOrders_SweepNetV2, filename="figures/PlotOrder_SweetNetVersion2.png", height = 24, width=28, units="cm", dpi=150)
+```
+
 
 Orders and pit falls
 ```{r Control Restoration and Reference Pitfall Comparison: By Order}
@@ -322,7 +561,88 @@ PlotOrders_Pitfall
 ggsave(plot=PlotOrders_Pitfall, filename="figures/PlotOrder_Pitfall.png", height = 16, width=26, units="cm", dpi=150)
 ```
 
-#Diversity Analyses
+```{r Diversity by Order for Pitfalls}
+#Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots 
+pitfalls <- piru_invertCLEAN %>% filter(samplingProtocol=="pitfall trap") 
+
+##COLEOPTERA
+PIT_coleoptera_diversity <- pitfalls %>% filter(order=="Coleoptera") 
+PIT_COL_sumformatrix <- PIT_coleoptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#creating events list of just the sweep nets
+pitfall_events <- events %>% filter(samplingProtocol=="pitfall trap")
+#adding event information
+x <- anti_join(PIT_COL_sumformatrix, pitfall_events) #checking if anything removed
+PIT_COL_sumformatrix2 <- inner_join(PIT_COL_sumformatrix, pitfall_events)
+
+PIT_COL_sumformatrix3 <- PIT_COL_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+PIT_COL_matrix <- spread(PIT_COL_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+PIT_COL_matrixnum <- PIT_COL_matrix[,4:25] 
+H <- diversity(PIT_COL_matrixnum, "shannon")
+#adding shannon into dataframe
+PIT_COL_matrix$shannon = H
+
+#Coleoptera Diversity Pitfalls
+pitcol <- PIT_COL_matrix %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+PIT_plotCol_div= ggplot(pitcol, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Coleoptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+PIT_plotCol_div
+
+##DIPTERA
+PIT_diptera_diversity <- pitfalls %>% filter(order=="Diptera") 
+PIT_DIP_sumformatrix <- PIT_diptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#adding event information
+x <- anti_join(PIT_DIP_sumformatrix, pitfall_events) #using R18 version to keep the fly diversity of unkwn collection type
+PIT_DIP_sumformatrix2 <- inner_join(PIT_DIP_sumformatrix, pitfall_events)
+
+PIT_DIP_sumformatrix3 <- PIT_DIP_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+PIT_DIP_matrix <- spread(PIT_DIP_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+PIT_DIP_matrixnum <- PIT_DIP_matrix[,4:26] 
+H <- diversity(PIT_DIP_matrixnum, "shannon")
+#adding shannon into dataframe
+PIT_DIP_matrix$shannon = H
+
+#Diptera Diversity Plots
+pitdip <- PIT_DIP_matrix %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+PIT_plotDip_div= ggplot(pitdip, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Diptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+PIT_plotDip_div
+
+##HYMENOPTERA
+PIT_hymenoptera_diversity <- pitfalls %>% filter(order=="Hymenoptera") 
+PIT_HYM_sumformatrix <- PIT_hymenoptera_diversity %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+
+#adding event information
+x <- anti_join(PIT_HYM_sumformatrix, pitfall_events) #checking if anything removed
+PIT_HYM_sumformatrix2 <- inner_join(PIT_sumformatrix, pitfall_events)
+PIT_HYM_sumformatrix3 <- PIT_HYM_sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+PIT_HYM_matrix <- spread(PIT_HYM_sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+PIT_HYM_matrixnum <- PIT_HYM_matrix[,4:82] 
+H <- diversity(PIT_HYM_matrixnum, "shannon")
+#adding shannon into dataframe
+PIT_HYM_matrix$shannon = H
+
+#Hymenoptera Diversity Plots
+pithym <- PIT_HYM_matrix %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+PIT_plotHym_div= ggplot(pithym, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Hymenoptera Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b"))  + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
+PIT_plotHym_div
+
+
+##Adding in Diversity figures into the figure array, MUST run chunks 16&18 above this first to create abun and rich figures
+PlotOrders_PitfallV2 = ggarrange(Colpitfall_abun, Dippitfall_abun, Hympitfall_abun, Colpitfall_rich, Dippitfall_rich, Hympitfall_rich, PIT_plotCol_div, PIT_plotDip_div, PIT_plotHym_div, common.legend=TRUE)
+PlotOrders_PitfallV2
+
+#Download Figures
+ggsave(plot=PlotOrders_PitfallV2, filename="figures/PlotOrder_PitfallVersion2.png", height = 22, width=26, units="cm", dpi=150)
+```
+
+# Step 4B. Diversity Analyses not inner mixed 
+AKA the by plot combo across collection type and then into ordinations
 ```{r Shannon Diversity and Ordination}
 library(vegan)
 
@@ -414,8 +734,83 @@ ggsave(plot=InsectOrdination, filename="figures/Ordination.png", height=18, widt
 ggsave(plot=InsectOrdination_EXP, filename="figures/Ordination_ControlRestoration2.png", height=18, width=18, units="cm", dpi=150)
 ```
 
+###Ordinations for all three plot types split by year
+```{r Ordinations by Year}
+##Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots (getting error trying to make matrix that it would take 22.9 GB)
+sumformatrix2022 <- piru_invertCLEAN %>% filter(year=="2022") %>% group_by(eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+sumformatrix2_2022 <- inner_join(sumformatrix2022, eventsR18)
+x <- anti_join(sumformatrix2022, eventsR18) #checking what was removed
+sumformatrix3_2022 <- sumformatrix2_2022 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+matrix2022 <- spread(sumformatrix3_2022, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+matrixnum2022 <- matrix2022[,4:110] 
+H <- diversity(matrixnum2022, "shannon")
+#adding shannon into dataframe
+matrix2022$shannon = H
 
-#Collected Taxa List
+##Ordinations
+#Three plot types
+ordination2022 <- metaMDS(matrixnum2022)
+ord_gg2022 = as.data.frame(scores(ordination2022)$sites)
+ord_gg2022$plotType = matrix2022$plotType
+ord_gg2022$year = matrix2022$year
+ord_gg2022$locationID = matrix2022$locationID
+
+(InsectOrdination2022 = ggplot(data=ord_gg2022, aes(x=NMDS1, y=NMDS2)) + 
+     geom_point(data = ord_gg2022, aes(colour = plotType), size = 3, alpha = 1)  + stat_ellipse(geom="polygon", type="t", alpha=0.2, aes(fill=plotType), show.legend=FALSE) +
+     theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+       axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+       legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       legend.text = element_text(size = 9, colour = "grey30")) + 
+     labs(colour = "PlotType"))
+
+adonis=adonis2(matrixnum2022~ord_gg2022$plotType, permutations=1000)
+adonis
+#plotType is sig P<0.000999
+
+#2023
+##Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots (getting error trying to make matrix that it would take 22.9 GB)
+sumformatrix2023 <- piru_invertCLEAN %>% filter(year=="2023") %>% group_by(eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+sumformatrix2_2023 <- inner_join(sumformatrix2023, events)
+x <- anti_join(sumformatrix2023, events) #checking what was removed
+sumformatrix3_2023 <- sumformatrix2_2023 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+matrix2023 <- spread(sumformatrix3_2023, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+matrixnum2023 <- matrix2023[,4:101] 
+H <- diversity(matrixnum2023, "shannon")
+#adding shannon into dataframe
+matrix2023$shannon = H
+
+##Ordinations
+#Three plot types
+ordination2023 <- metaMDS(matrixnum2023)
+ord_gg2023 = as.data.frame(scores(ordination2023)$sites)
+ord_gg2023$plotType = matrix2023$plotType
+ord_gg2023$year = matrix2023$year
+ord_gg2023$locationID = matrix2023$locationID
+
+(InsectOrdination2023 = ggplot(data=ord_gg2023, aes(x=NMDS1, y=NMDS2)) + 
+     geom_point(data = ord_gg2023, aes(colour = plotType), size = 3, alpha = 1)  + stat_ellipse(geom="polygon", type="t", alpha=0.2, aes(fill=plotType), show.legend=FALSE) +
+     theme(axis.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "grey30"), 
+       axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+       legend.title = element_text(size = 10, face = "bold", colour = "grey30"), 
+       legend.text = element_text(size = 9, colour = "grey30")) + 
+     labs(colour = "PlotType"))
+
+adonis23=adonis2(matrixnum2023~ord_gg2023$plotType, permutations=1000)
+adonis23
+#plotType is sig P<0.002997
+
+#Download ordination
+ggsave(plot=InsectOrdination2022, filename="figures/Ordination2022.png", height=18, width=18, units="cm", dpi=150)
+ggsave(plot=InsectOrdination2023, filename="figures/Ordination2023.png", height=18, width=18, units="cm", dpi=150)
+```
+
+#Step 4C. Collected Taxa List & Unique Taxa by plot type
 ```{r Collected Taxa list}
 specieslist_prep <- piru_invertCLEAN %>% group_by(eventID, morph, MorphospeciesName, locationID) %>% mutate(MorphCount=sum(individualCount)) %>% select(order, family, genus, scientificName, MorphospeciesName, morph, eventID, locationID, MorphCount)
 
@@ -449,7 +844,8 @@ write.csv(reference_unique, "figures/ReferenceUniqueTaxa.csv", na="")
 write.csv(restoration_unique, "figures/RestorationUniqueTaxa.csv", na="")
 ```
 
-#Comparison to Plant Data
+
+#Step 4D. Correlations with Abiotic and Plant Data
 ```{r Adding Insect Orders to plotsummary}
 #Must run four chunks 8-11 above to split by insect order
 #Adding in the abundance and richness of each order to the plot Summary
