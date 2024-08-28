@@ -45,7 +45,7 @@ plot2023 <- plots %>% add_column(year="2023")
 plots = full_join(plot2022, plot2023)
 plots$year = as.character(plots$year)
 #sorting to only include lines/Project# with count information (removing blanks). Then selecting only the columns that we might need. Also only including the three big focal orders that were choosen due to their roles in the environment (Coleoptera, Diptera and Hymenoptera)
-piru_invertCLEAN <- piru_invertALL %>% drop_na(c("individualCount")) %>% select("Project#", "Morphospecies#", "MorphospeciesName", order, superfamily, family, genus, scientificName, individualCount, lifeStage, eventID, samplingProtocol, locationID, year, month, day, fieldNumber) %>% rename(morph="Morphospecies#") %>% filter(order=="Coleoptera" | order=="Diptera" | order=="Hymenoptera")
+piru_invertCLEAN <- piru_invertALL %>% drop_na(c("individualCount")) %>% select("Project#", "Morphospecies#", "MorphospeciesName", order, superfamily, family, genus, scientificName, individualCount, lifeStage, eventID, samplingProtocol, locationID, year, month, day, fieldNumber, associatedMedia) %>% rename(morph="Morphospecies#") %>% filter(order=="Coleoptera" | order=="Diptera" | order=="Hymenoptera")
 
 #plant and abiotic data
 plot_character <- read_csv('cleanGeographicPlantData_Piru.csv') %>% rename(plotyear="PlotID")
@@ -96,6 +96,74 @@ plotSummary_rich
 #Download the figures 
 ggsave(plot=plotSummary_abun, filename="figures/Plot_Abundance20222023.png", height = 14, width=16, units="cm", dpi=150)
 ggsave(plot=plotSummary_rich, filename="figures/Plot_Richness2022023.png", height = 14, width=16, units="cm", dpi=150)
+```
+
+
+```{r FIGURE 1. All three Plot Types}
+#Comparing all three plot types 
+threeTreatments <- plotSummary %>% separate(locationID, into=paste0("type", 1:3), sep=1:3) %>% unite("Number", type2:type3, remove=TRUE, sep="") %>% rename(Type="type1") %>% unite("Plot", Type:Number, sep="", remove=FALSE) %>% rename(plotType="Type") %>% mutate(plotType=str_replace_all(plotType, fixed('C'), 'Control')) %>% mutate(plotType=str_replace_all(plotType, fixed('R'), 'Restoration')) %>% mutate(plotType=str_replace_all(plotType, fixed('Z'), 'Reference')) %>% reorder_levels(plotType, order = c("Control", "Restoration", "Reference"))
+
+threeTreatments %>% identify_outliers(InsectAbundance)
+#extreme outliers
+threeTreatments %>% shapiro_test(InsectAbundance)
+#not normal
+threeplotSummary_abun = ggplot(threeTreatments, aes(x=year, y=InsectAbundance, fill=plotType)) + geom_boxplot() + stat_compare_means(method="kruskal.test", label.y=50) + labs(y="Insect Abundance", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24))+theme_bw()
+threeplotSummary_abun
+
+threeTreatments2022 <- threeTreatments %>% filter(year=="2022")
+threeTreatments2023 <- threeTreatments %>% filter(year=="2023")
+library(FSA)
+dunnTest(InsectAbundance~plotType, data=threeTreatments2022)
+dunnTest(InsectAbundance~plotType, data=threeTreatments2023)
+
+
+
+threeTreatments %>% identify_outliers(InsectRichness)
+#outliers, but non extreme
+threeTreatments %>% shapiro_test(InsectRichness)
+#not normal
+threeplotSummary_rich = ggplot(threeTreatments, aes(x=year, y=InsectRichness, fill=plotType)) + geom_boxplot()+ stat_compare_means(method="kruskal.test", label.y=27) + labs(y="Insect Richness", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24))+theme_bw()
+threeplotSummary_rich
+dunnTest(InsectRichness~plotType, data=threeTreatments2022)
+dunnTest(InsectRichness~plotType, data=threeTreatments2023)
+
+
+library(vegan)
+
+#Summarizing the abundance by plot type, year, morph and plot ID. Adding in the plot type as a separate column, there is way to much data to look at it by individ plots (getting error trying to make matrix that it would take 22.9 GB)
+sumformatrix <- piru_invertCLEAN %>% group_by(year, eventID, morph, MorphospeciesName, locationID) %>% summarise(MorphCount=sum(individualCount)) %>% ungroup()
+sumformatrix2 <- inner_join(sumformatrix, events)
+x <- anti_join(sumformatrix, events) #checking what was removed
+sumformatrix3 <- sumformatrix2 %>% group_by(year,locationID, MorphospeciesName, plotType) %>% summarise(MorphCounts=sum(MorphCount))
+#need to turn the data into a matrix, with plot and plot type as x-columns and morphs as y-columns 
+matrix <- spread(sumformatrix3, MorphospeciesName, MorphCounts, drop=TRUE) %>% replace(is.na(.), 0) 
+#calculating shannon diversity
+matrixnum <- matrix[,4:163] 
+H <- diversity(matrixnum, "shannon")
+#adding shannon into dataframe
+matrix$shannon = H
+
+#Figure with all three plotTypes
+ShannonDiversity = ggplot(matrix, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4", "#204e2b" )) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="kruskal.test", label.y=2.9) + scale_y_continuous(limits=c(0,3), expand = c(0,0.05))
+ShannonDiversity
+
+
+library(FSA)
+shannon2022 <- matrix %>% filter(year=="2022")
+shannon2023 <- matrix %>% filter(year=="2023")
+library(FSA)
+dunnTest(shannon~plotType, data=shannon2022)
+dunnTest(shannon~plotType, data=shannon2023)
+dunnTest(shannon~plotType,data=matrix)
+
+Figure1 = ggarrange( threeplotSummary_abun, threeplotSummary_rich, ShannonDiversity, common.legend=TRUE, nrow=1)
+Figure1
+
+#Download the figures 
+ggsave(plot=threeplotSummary_abun, filename="figures/ALLTREATMENT_Plot_Abundance20222023.png", height = 14, width=16, units="cm", dpi=150)
+ggsave(plot=threeplotSummary_rich, filename="figures/ALLTREATMENT_Plot_Richness2022023.png", height = 14, width=16, units="cm", dpi=150)
+
+ggsave(plot=Figure1, filename="figures/AllTreatment_AllAnalyses.png", height=14, width=35, units="cm" )
 ```
 
 Comparing the three different treatments by year and abund, rich and diversity of pit fall traps.
@@ -678,6 +746,12 @@ matrix_exp$shannon = H_exp
 ShannonDiversity2 = ggplot(matrix_exp, aes(x=year, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Year") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="wilcox", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
 ShannonDiversity2
 
+#Abun, Rich and Div together
+PlotAll = ggarrange(plotSummary_abun, plotSummary_rich, ShannonDiversity2, nrow=1, common.legend=TRUE)
+PlotAll
+#download
+ggsave(plot=PlotAll, filename="figures/PlotAll.png", height=14, width=35, units="cm", dpi=150)
+
 ShannonDiversity2.1 = ggplot(matrix_exp, aes(x=plotType, y=shannon, fill=plotType)) + geom_boxplot() + labs(y="Shannon Diversity", x="Plot Type") + scale_fill_manual(values=c("#F2E80A", "#C2D6D4")) + theme(text=element_text(size=24)) + theme_bw() + stat_compare_means(method="wilcox", label.y=3, size=3) + scale_y_continuous(limits=c(0,3.2), expand = c(0,0.1))
 ShannonDiversity2.1
 
@@ -812,15 +886,20 @@ ggsave(plot=InsectOrdination2023, filename="figures/Ordination2023.png", height=
 
 #Step 4C. Collected Taxa List & Unique Taxa by plot type
 ```{r Collected Taxa list}
-specieslist_prep <- piru_invertCLEAN %>% group_by(eventID, morph, MorphospeciesName, locationID) %>% mutate(MorphCount=sum(individualCount)) %>% select(order, family, genus, scientificName, MorphospeciesName, morph, eventID, locationID, MorphCount)
+specieslist_prep <- piru_invertCLEAN %>% group_by(eventID, morph, MorphospeciesName, locationID) %>% mutate(MorphCount=sum(individualCount)) %>% select(order, family, genus, scientificName, MorphospeciesName, morph, eventID, locationID, MorphCount, associatedMedia)
 
 specieslist_prep2 <- left_join(specieslist_prep, events)
 
-specieslist_long <- specieslist_prep2 %>% group_by(morph, MorphospeciesName, order, family, genus, plotType) %>% summarise(num=sum(MorphCount))
+specieslist_long <- specieslist_prep2 %>% group_by(morph, MorphospeciesName, order, family, genus, plotType, associatedMedia) %>% summarise(num=sum(MorphCount))
 
-specieslist <- specieslist_long %>% distinct(morph, .keep_all=TRUE) %>% select(order, family, genus, MorphospeciesName, morph, -plotType, -num)
+specieslist <- specieslist_long %>% distinct(morph, associatedMedia, .keep_all=TRUE) %>% select(order, family, genus, MorphospeciesName, morph, associatedMedia, -plotType, num)
 
-write.csv(specieslist, "figures/specieslist.csv", na="")
+specieslist_prep3 <- specieslist_prep2 %>% group_by(morph, MorphospeciesName, order, family, genus) %>% summarise(num=sum(MorphCount))
+
+associatedMedia <- piru_invertCLEAN %>% select(morph, associatedMedia) %>% drop_na()
+specieslist_table <- left_join(specieslist_prep3, associatedMedia)
+
+write.csv(specieslist_table, "figures/specieslist_table.csv", na="")
 
 #By plot type 
 control_list <- specieslist_long %>% filter(plotType=="Control")
