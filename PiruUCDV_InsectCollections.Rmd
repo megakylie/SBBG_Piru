@@ -84,13 +84,13 @@ plotSummary2 %>% identify_outliers(InsectAbundance)
 #extreme outliers
 plotSummary2 %>% shapiro_test(InsectAbundance)
 #not normal
-plotSummary_abun = ggplot(plotSummary2, aes(x=year, y=InsectAbundance, fill=Type)) + geom_boxplot() + stat_compare_means(method="wilcox", paired=TRUE) + labs(y="Insect Abundance", x="Year") + scale_fill_manual(values=c("#F2E80A","#C2D6D4")) + theme(text=element_text(size=24))+theme_bw()
+plotSummary_abun = ggplot(plotSummary2, aes(x=year, y=InsectAbundance, fill=Type)) + geom_boxplot(color="#808080") + stat_compare_means(method="wilcox", paired=TRUE) + labs(y="Insect Abundance", x="Year") + scale_fill_manual(values=c("#ff0000", "#a9d18e")) + theme(text=element_text(size=24))+theme_classic()
 plotSummary_abun
 plotSummary2 %>% identify_outliers(InsectRichness)
 #outliers, but non extreme
 plotSummary2 %>% shapiro_test(InsectRichness)
 #not normal
-plotSummary_rich = ggplot(plotSummary2, aes(x=year, y=InsectRichness, fill=Type)) + geom_boxplot() + stat_compare_means(method="wilcox", paired=TRUE) + labs(y="Insect Richness", x="Year") + scale_fill_manual(values=c("#F2E80A","#C2D6D4")) + theme(text=element_text(size=24))+theme_bw()
+plotSummary_rich = ggplot(plotSummary2, aes(x=year, y=InsectRichness, fill=Type)) + geom_boxplot(color="#808080") + stat_compare_means(method="wilcox", paired=TRUE) + labs(y="Insect Richness", x="Year") + scale_fill_manual(values=c("#F2E80A","#C2D6D4")) + theme(text=element_text(size=24))+theme_bw()
 plotSummary_rich
 
 #Download the figures 
@@ -1043,6 +1043,13 @@ corr2023rest = corrplot(cor(coor_2023_rest), method='number', title='2023 Restor
 corr2023rest
 ```
 
+#Table of Treatment x Order Counts
+```{r }
+plotSummary3 <- plotSummary2 %>% rename(locationID="Plot") %>% ungroup() %>% select(locationID, Type) %>% distinct(locationID, .keep_all=TRUE)
+piru_invertCLEAN2 <- left_join(piru_invertCLEAN, plotSummary3)
+summaryTable <- piru_invertCLEAN2 %>% group_by(year, order, Type) %>% summarise(MorphCount=sum(individualCount))   
+
+```
 
 
 #Extra 2022: Getting Ant Abundance and Diversity data by plot type (control or restoration) for Zach
